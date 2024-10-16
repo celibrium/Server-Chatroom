@@ -178,10 +178,46 @@ class ClientTCP:
 
     def send(self, text):
         self.clientSocket.sendall(text.encode())
+
     def receive(self):
-        pass
+        # receive messages until message is server shutdown in which events will be set to true
+        while self.exitReceive.is_set() == False:
+            message = self.clientSocket.recv(1028).decode()
+
+            if message == 'server-shutdown':
+                self.exitReceive.set()
+                self.exitRun.set()
+            else:
+                print(message)
+
     def run(self):
-        pass
+        try:
+            self.connect_server()
+
+            receiveThread = threading.Thread(target=self.receive)
+            receiveThread.start()
+
+            while self.exit_run.is_set() == False:
+                userInput = input("Enter message (type 'exit' to leave): ")
+                # if the user input is exit then events will be set
+                if userInput == 'exit':
+                    self.send('exit')
+                    self.exit_run.set() 
+                    self.exit_receive.set()  
+                    break
+
+                # Otherwise, send the message to the server
+                self.send(userInput)
+
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt, exiting")
+            self.send('exit')
+            self.exit_receive.set()
+            self.exit_run.set() 
+            
+        finally:
+            receiveThread.join()
+            print("Client has exited.")
 
 class ServerUDP:
     def __init__(self, server_port):
