@@ -16,7 +16,7 @@ class ServerTCP:
         print(f"Listening on server address {addr} and port {server_port}")
 
         # initialize empty dict to store clients address and name
-        clients = {}
+        self.clients = {}
 
         # events to handle server and message state
         self.runEvent = threading.Event()
@@ -145,11 +145,39 @@ class ServerTCP:
 
 class ClientTCP:
     def __init__(self, client_name, server_port):
-        pass
+        # initialize instance variables
+        self.client_name = client_name
+        self.server_port = server_port
+
+        # get server address and initalize client socket
+        self.serverAddr = socket.gethostbyname(socket.gethostname())
+        self.clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # make variables to handle threading events
+        self.exitRun = threading.Event()
+        self.exitReceive = threading.Event()
+
     def connect_server(self):
-        pass
+        try:
+            # connect the client sokcet to the given addr and port
+            self.clientSocket.connect((self.serverAddr, self.server_port))
+
+            # send thc client name to the server and get a response
+            self.clientSocket.sendall(self.client_name.encode())
+            response = self.lientSocket.recv(1028).decode()
+
+            if 'Welcome' in response:
+                print(f"{response}")
+                return True
+            else:
+                return False
+            
+        except Exception as e:
+            print(f"Error connecting to the server: {e}")
+            return False
+
     def send(self, text):
-        pass
+        self.clientSocket.sendall(text.encode())
     def receive(self):
         pass
     def run(self):
