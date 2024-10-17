@@ -221,19 +221,119 @@ class ClientTCP:
 
 class ServerUDP:
     def __init__(self, server_port):
-        pass
+        self.server_port = server_port
+        serverAddr = socket.gethostbyname(socket.gethostname())
+
+        self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.serverSocket.bind(serverAddr, server_port)
+
+        self.clients = {}
+        self.messages = []
+
     def accept_client(self, client_addr, message):
-        pass
+        clientName = message
+
+        # Check if the client's name is in the dict and return False if it is
+        if clientName in self.clients.values():
+            self.server_socket.sendto("Name already taken".encode(), client_addr)
+            return False
+
+        # Otherwise, send a "Welcome" message to the client
+        welcomeMessage = "Welcome to the chat!"
+        self.server_socket.sendto(welcomeMessage.encode(), client_addr)
+
+        # Add the client's address and name to the clients dictionary
+        self.clients[client_addr] = clientName
+
+        # append the client address and user x joined message to the list
+        joinMessage = f"User {clientName} joined"
+        self.messages.append((client_addr, joinMessage))
+
+        self.broadcast()
+        return True
+    
     def close_client(self, client_addr):
-        pass
+        # Check if the client exists in the clients dictionary
+        if client_addr not in self.clients:
+            return False
+
+        clientName = self.clients[client_addr]
+        userLeft = f"User {clientName} left"
+
+        # Append the message to the messages list and remove client from dict
+        self.messages.append((client_addr, userLeft))
+        del self.clients[client_addr]
+
+        self.broadcast()
+        return True
+    
     def broadcast(self):
-        pass
+        # if messages is empty, return
+        if not self.messages:
+            return
+        
+        # Get the most recent message from the messages list
+        clientAddr, message = self.messages[-1]
+
+        # Iterate over the clients dictionary
+        for c in self.clients:
+            if c == clientAddr:
+                continue
+            
+            # Send the message to all clients except the client who sent the message
+            self.server_socket.sendto(message.encode(), c)
+
     def shutdown(self):
-        pass
+        self.message.append((None, 'server-shutdown'))
+        self.broadcast()
+
+        # Broadcast the shutdown message to all connected clients
+        for client_addr in list(self.clients.keys()):
+            self.close_client(client_addr)
+
+        # Close the server socket
+        self.server_socket.close()
+        print("Server has been shut down.")
+
     def get_clients_number(self):
-        pass
+        return len(self.clients)
+        
     def run(self):
-        pass
+        try:
+            while True:
+                # Receive a message and the client's address
+                data, client_addr = self.server_socket.recvfrom(1024)  # buffer size of 1024 bytes
+                message = data.decode('utf-8').strip()
+
+                # Check if the client is joining
+                if message.startswith("join"):
+                    if not self.accept_client(client_addr, message):
+                        # If the name is already taken, notify the client
+                        self.server_socket.sendto("Name already taken".encode('utf-8'), client_addr)
+                    continue
+
+                # Check if the client is leaving
+                if message == "exit":
+                    self.close_client(client_addr)
+                    continue
+
+                # Handle regular messages from connected clients
+                if client_addr in self.clients:
+                    # Append the message to the server's message list
+                    client_name = self.clients[client_addr]
+                    self.messages.append((client_addr, f"{client_name}: {message}"))
+                    # Broadcast the message to other clients
+                    self.broadcast()
+                else:
+                    # If the client is not recognized (hasn't joined), ignore the message
+                    self.server_socket.sendto("You need to join first.".encode('utf-8'), client_addr)
+
+        except KeyboardInterrupt:
+            print("Server is shutting down due to KeyboardInterrupt.")
+            self.shutdown()
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            self.shutdown()
 
 class ClientUDP:
     def __init__(self, client_name, server_port):
