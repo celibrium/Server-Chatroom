@@ -303,30 +303,19 @@ class ServerUDP:
             while True:
                 # Receive a message and the client's address
                 data, client_addr = self.server_socket.recvfrom(1024)  # buffer size of 1024 bytes
-                message = data.decode('utf-8').strip()
+                message = data.decode()
 
-                # Check if the client is joining
-                if message.startswith("join"):
-                    if not self.accept_client(client_addr, message):
-                        # If the name is already taken, notify the client
-                        self.server_socket.sendto("Name already taken".encode('utf-8'), client_addr)
-                    continue
-
-                # Check if the client is leaving
-                if message == "exit":
+                
+                if message == 'join':
+                    self.accept_client(client_addr, message)
+                elif message == "exit":
                     self.close_client(client_addr)
-                    continue
-
-                # Handle regular messages from connected clients
-                if client_addr in self.clients:
-                    # Append the message to the server's message list
-                    client_name = self.clients[client_addr]
-                    self.messages.append((client_addr, f"{client_name}: {message}"))
-                    # Broadcast the message to other clients
-                    self.broadcast()
                 else:
-                    # If the client is not recognized (hasn't joined), ignore the message
-                    self.server_socket.sendto("You need to join first.".encode('utf-8'), client_addr)
+                    if client_addr in self.clients:
+                        self.messages.append(client_addr, message)
+
+                # Broadcast the message to other clients
+                self.broadcast()
 
         except KeyboardInterrupt:
             print("Server is shutting down due to KeyboardInterrupt.")
@@ -337,12 +326,86 @@ class ServerUDP:
 
 class ClientUDP:
     def __init__(self, client_name, server_port):
-        pass
+        self.client_name = client_name
+        self.server_port = server_port
+
+        self.serverAddr = socket.gethostbyname(socket.gethostname())
+        self.clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        self.exitRun = threading.Event()
+        self.exitReceive = threading.Event()
+
     def connect_server(self):
-        pass
+        # try to send join message and wait for response
+        try:
+            self.send('join')
+
+            data, server_addr = self.client_socket.recvfrom(1024)
+            response = data.decode()
+
+            # if the response is Welcome then return True
+            if response == 'Welcome':
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            print(f"Error connecting to the server: {e}")
+            return False
+
     def send(self, text):
-        pass
+        try:
+            message = f"{self.client_name}:{text}"
+
+            self.clientSocket.sendto(message.encode(), self.serverAddr)
+            print("message sent")
+
+        except Exception as e:
+            print(f"message couldn't send: {e}")
+
     def receive(self):
-        pass
+        try:
+            while self.exitReceive.is_set() == False:
+                data, server_addr = self.client_socket.recvfrom(1024)
+                message = data.decode()
+
+                if message == 'server-shutdown':
+                    self.exitReceive.set()
+                    self.exitRun.set()
+                    break
+                else:
+                    print(message)
+
+        except Exception as e:
+            print(f"receive failed: {e}")
+
     def run(self):
-        pass
+        try:
+            self.connect_server()
+
+            receiveThread = threading.Thread(target=self.receive)
+            receiveThread.start()
+
+            while self.exit_run.is_set() == False:
+                userInput = input("Enter message (type 'exit' to leave): ")
+
+                # if the user input is exit then events will be set
+                if userInput == 'exit':
+                    self.send('exit')
+                    self.exitRun.set() 
+                    self.exitReceive.set()  
+                    break
+
+                # Otherwise, send the message to the server
+                self.send(userInput)
+
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt, exiting")
+            self.send('exit')
+            self.exit_receive.set()
+            self.exit_run.set() 
+            
+        finally:
+            receiveThread.join()
+            print("Client has exited.")
+        
