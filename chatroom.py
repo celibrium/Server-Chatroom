@@ -27,7 +27,7 @@ class ServerTCP:
         try:
             # accept client connection
             clientSocket, clientAddr = self.serverSocket.accept()
-            print(f"Recieved connection from {clientAddr}")
+            print(f"Received connection from {clientAddr}")
 
             # stores name into variable
             clientName = clientSocket.recv(1024).decode()
@@ -38,10 +38,15 @@ class ServerTCP:
                 clientSocket.close()
                 return False
             else:
-            #if not, then add client name to dict and broadcast join
+            #if not, then add client name to dict nd broadcast join
                 clientSocket.sendall(f"Welcome {clientName}.".encode())
                 self.clients[clientSocket] = clientName
                 self.broadcast(clientSocket, 'join')
+
+                clientThread = threading.Thread(target=self.handle_client, args=(clientSocket,))
+                clientThread.daemon = True  
+                clientThread.start()
+
                 return True
 
         except Exception as e:
@@ -125,17 +130,9 @@ class ServerTCP:
         print("Server started.")
         try:
             while self.runEvent.is_set() == False:  
-                # Accept a new client connection
-                clientSocket, clientAddr = self.serverSocket.accept()
-                print(f"Accepted connection from {clientAddr}")
-                
                 # Handle the new client
-                if self.accept_client(clientSocket):
-                    # If the client is accepted (i.e., has a unique name), start a new thread to handle the client
-                    clientThread = threading.Thread(target=self.handle_client, args=(clientSocket))
-                    # exits when main program exits
-                    clientThread.daemon = True 
-                    clientThread.start()
+                if self.accept_client():
+                    print("client accepted successfully")
         
         except KeyboardInterrupt:
             print("Keyboard interrupt, server shutting down")
@@ -164,7 +161,7 @@ class ClientTCP:
 
             # send thc client name to the server and get a response
             self.clientSocket.sendall(self.client_name.encode())
-            response = self.lientSocket.recv(1028).decode()
+            response = self.clientSocket.recv(1028).decode()
 
             if 'Welcome' in response:
                 print(f"{response}")
@@ -197,8 +194,8 @@ class ClientTCP:
             receiveThread = threading.Thread(target=self.receive)
             receiveThread.start()
 
-            while self.exit_run.is_set() == False:
-                userInput = input("Enter message (type 'exit' to leave): ")
+            while self.exitRun.is_set() == False:
+                userInput = input("Enter message (type 'exit' to leave):\n ")
                 # if the user input is exit then events will be set
                 if userInput == 'exit':
                     self.send('exit')
@@ -212,8 +209,8 @@ class ClientTCP:
         except KeyboardInterrupt:
             print("KeyboardInterrupt, exiting")
             self.send('exit')
-            self.exit_receive.set()
-            self.exit_run.set() 
+            self.exitReceive.set()
+            self.exitRun.set() 
             
         finally:
             receiveThread.join()
