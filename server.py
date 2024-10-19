@@ -1,4 +1,4 @@
 
-from chatroom import ServerTCP
-server = ServerTCP(12345)
+from chatroom import ServerUDP
+server = ServerUDP(12345)
 server.run()

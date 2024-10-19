@@ -2,6 +2,7 @@ import socket
 import threading 
 import select
 
+
 class ServerTCP:
     def __init__(self, server_port):
         # get local machines IP address
@@ -41,12 +42,9 @@ class ServerTCP:
             if readable:
                 # stores name into variable
                 clientName = client_socket.recv(1024).decode()
-                print(f"TESTING {self.clients}")
-                print(f"TESTING : CLIENT NAME IS {clientName}")
 
                 # checks if the client name is in dict
                 if clientName in self.clients.values():
-                    print("HEWO HEWO")
                     client_socket.sendall("Name already taken".encode())
                     
                     #client_socket.close()
@@ -267,7 +265,7 @@ class ClientTCP:
             receiveThread.join()
             print("Client has exited.")
 
-'''
+
 class ServerUDP:
     def __init__(self, server_port):
         self.server_port = server_port
@@ -290,6 +288,8 @@ class ServerUDP:
         # Otherwise, send a "Welcome" message to the client
         welcomeMessage = "Welcome!"
         self.server_socket.sendto(welcomeMessage.encode(), client_addr)
+        print(f"Sent welcome message to {clientName}")
+
 
         # Add the client's address and name to the clients dictionary
         self.clients[client_addr] = clientName
@@ -333,16 +333,17 @@ class ServerUDP:
             self.server_socket.sendto(message.encode(), c)
 
     def shutdown(self):
-        self.messages.append((None, 'server-shutdown'))
-        self.broadcast()
+       #self.messages.append((None, 'server-shutdown'))
+       #self.broadcast()
 
         # Broadcast the shutdown message to all connected clients
         for client_addr in list(self.clients.keys()):
+            self.server_socket.sendto("server-shutdown".encode(), client_addr)
             self.close_client(client_addr)
 
         # Close the server socket
         self.server_socket.close()
-        print("Server has been shut down.")
+        print("Server shutting down.")
 
     def get_clients_number(self):
         return len(self.clients)
@@ -353,20 +354,30 @@ class ServerUDP:
         try:
             while True:
                 # Receive a message and the client's address
-                data, client_addr = self.server_socket.recvfrom(1024)  # buffer size of 1024 bytes
-                message = data.decode()
-                clientName = message.split(':')[0]
+                readable, _, _ = select.select([self.server_socket], [], [], 1)
 
-                if 'join' in message:
-                    self.accept_client(client_addr, clientName)
-                elif message == "exit":
-                    self.close_client(client_addr)
-                else:
-                    if client_addr in self.clients:
-                        self.messages.append(client_addr, clientName)
+                if readable:
+                    data, client_addr = self.server_socket.recvfrom(1024)  # buffer size of 1024 bytes
+                    message = data.decode()
+
+                    parts = message.split(':')
+                    if len(parts) == 2:
+                        clientName, msgContent = parts
+                    else:
+                        clientName, msgContent = parts[0], ""
+
+                    if 'join' in msgContent:
+                        self.accept_client(client_addr, clientName)
+                    elif msgContent == "exit":
+                        self.close_client(client_addr)
+                    else:
+                        if client_addr in self.clients:
+                            fullMessage = f"{clientName}: {msgContent}"
+                            self.messages.append((client_addr, fullMessage))
+                            self.broadcast()
 
                 # Broadcast the message to other clients
-                self.broadcast()
+                #self.broadcast()
 
         except KeyboardInterrupt:
             print("Server is shutting down due to KeyboardInterrupt.")
@@ -389,17 +400,28 @@ class ClientUDP:
     def connect_server(self):
         # try to send join message and wait for response
         try:
-            self.send('join')
+            #self.send('join')
+            join_message = f"{self.client_name}:join"
+            self.client_socket.sendto(join_message.encode(), (self.server_addr, self.server_port))
 
-            data, _ = self.client_socket.recvfrom(1024)
-            response = data.decode()
+            readable, _, _ = select.select([self.client_socket], [], [], 5)
+            if readable:
 
-            # if the response is Welcome then return True
-            if response == 'Welcome':
-                print("Connected to chat")
-                return True
-            else:
-                return False
+                data, _ = self.client_socket.recvfrom(1024)
+                response = data.decode()
+
+                # if the response is Welcome then return True
+                if response == 'Welcome!':
+                    print("Connected to chat")
+                    return True
+                elif response == "Name already taken":
+                    print("Name already taken")
+                    self.client_socket.close() 
+                    self.exit_run.set()  
+                    self.exit_receive.set()
+                    return False
+                else:
+                    return False
 
         except Exception as e:
             print(f"Error connecting to the server: {e}")
@@ -418,15 +440,19 @@ class ClientUDP:
     def receive(self):
         try:
             while self.exit_receive.is_set() == False:
-                data, server_addr = self.client_socket.recvfrom(1024)
-                message = data.decode()
+                readable, _, _ = select.select([self.client_socket], [], [], 1)
 
-                if message == 'server-shutdown':
-                    self.exit_receive.set()
-                    self.exit_run.set()
-                    break
-                else:
-                    print(message)
+                if readable:
+                    data, _ = self.client_socket.recvfrom(1024)
+                    message = data.decode()
+
+                    if message == 'server-shutdown':
+                        print("Server is shutting down.")
+                        self.exit_receive.set()
+                        self.exit_run.set()
+                        break
+                    else:
+                        print(message)
 
         except Exception as e:
             print(f"receive failed: {e}")
@@ -439,7 +465,7 @@ class ClientUDP:
             receiveThread.start()
 
             while self.exit_run.is_set() == False:
-                userInput = input("Enter message (type 'exit' to leave): ")
+                userInput = input("Enter message (type 'exit' to leave): \n")
 
                 # if the user input is exit then events will be set
                 if userInput == 'exit':
@@ -460,4 +486,3 @@ class ClientUDP:
         finally:
             receiveThread.join()
             print("Client has exited.")
-''' 
