@@ -16,8 +16,11 @@ class ServerTCP:
         self.server_socket.listen(10)
         print(f"Listening on server address {addr} and port {server_port}")
 
+        self.server_socket.setblocking(False) 
+
         # initialize empty dict to store clients address and name
         self.clients = {}
+        self.sockets = [self.server_socket]
 
         # events to handle server and message state
         self.run_event = threading.Event()
@@ -25,33 +28,40 @@ class ServerTCP:
 
 
     def accept_client(self):
+        #import pdb; pdb.set_trace()
         try:
             # accept client connection
             client_socket, clientAddr = self.server_socket.accept()
             print(f"Received connection from {clientAddr}")
 
-            # stores name into variable
-            clientName = client_socket.recv(1024).decode()
-            print(f"TESTING {self.clients}")
-            print(f"TESTING : CLIENT NAME IS {clientName}")
+            client_socket.setblocking(False)  # Non-blocking mode
+            self.sockets.append(client_socket)  # Add to monitored sockets
 
-            # checks if the client name is in dict
-            if clientName in self.clients.values():
-                print("HEWO HEWO")
-                client_socket.sendall("Name already taken".encode())
-                client_socket.close()
-                return False
-            else:
-            #if not, then add client name to dict nd broadcast join
-                client_socket.sendall(f"Welcome {clientName}.".encode())
-                self.clients[client_socket] = clientName
-                self.broadcast(client_socket, 'join')
+            readable, _, _ = select.select([client_socket], [], [], 1)
+            if readable:
+                # stores name into variable
+                clientName = client_socket.recv(1024).decode()
+                print(f"TESTING {self.clients}")
+                print(f"TESTING : CLIENT NAME IS {clientName}")
 
-                clientThread = threading.Thread(target=self.handle_client, args=(client_socket,))
-                clientThread.daemon = True  
-                clientThread.start()
+                # checks if the client name is in dict
+                if clientName in self.clients.values():
+                    print("HEWO HEWO")
+                    client_socket.sendall("Name already taken".encode())
+                    
+                    #client_socket.close()
+                    return False
+                else:
+                #if not, then add client name to dict nd broadcast join
+                    client_socket.sendall(f"Welcome {clientName}.".encode())
+                    self.clients[client_socket] = clientName
+                    self.broadcast(client_socket, 'join')
 
-                return True
+                    clientThread = threading.Thread(target=self.handle_client, args=(client_socket,))
+                    clientThread.daemon = True  
+                    clientThread.start()
+
+                    return True
 
         except Exception as e:
             print(f"Error accepting client connection: {e}")
@@ -62,6 +72,7 @@ class ServerTCP:
             # check if the given client socket is in the dict, if it is delete from dict and close socket
             if client_socket in self.clients:
                 clientName = self.clients.get(client_socket)
+                self.sockets.remove(client_socket)
                 del self.clients[client_socket]
 
                 client_socket.close()
@@ -116,16 +127,21 @@ class ServerTCP:
         
     def get_clients_number(self):
         return len(self.clients)
+    
         
     def handle_client(self, client_socket):
         try:
             while self.handle_event.is_set() == False:
-                message = client_socket.recv(1028).decode()
+                readable, _, _ = select.select([client_socket], [], [], 1)
+                if readable:
+                    message = client_socket.recv(1028).decode()
 
-                if message == 'exit':
-                    self.broadcast(client_socket, 'exit')
-                else:
-                    self.broadcast(client_socket, message)
+                    if not message or message == 'exit':
+                        self.broadcast(client_socket, 'exit')
+                        self.close_client(client_socket)  
+                        break  
+                    else:
+                        self.broadcast(client_socket, message)
 
         except Exception as e:
             print(f"Error handling client {client_socket}: {e}")
@@ -133,13 +149,16 @@ class ServerTCP:
     def run(self):
         print("Server started.")
         try:
-            while self.run_event.is_set() == False:  
-                # Handle the new client
-                if self.accept_client():
-                    print("client accepted successfully")
+            while self.run_event.is_set() == False:
+                readable, _, _ = select.select(self.sockets, [], [], 1)
+                for socket in readable:
+                    if socket == self.server_socket:
+                        self.accept_client()
         
         except KeyboardInterrupt:
             print("Keyboard interrupt, server shutting down")
+        except Exception as e:
+            print(f"Error running: {e}")
         
         finally:
             self.shutdown()
@@ -163,15 +182,24 @@ class ClientTCP:
             # connect the client sokcet to the given addr and port
             self.client_socket.connect((self.server_addr, self.server_port))
 
-            # send thc client name to the server and get a response
+            # send the client name to the server and get a response
             self.client_socket.sendall(self.client_name.encode())
-            response = self.client_socket.recv(1028).decode()
 
-            if 'Welcome' in response:
-                print(f"{response}")
-                return True
-            else:
-                return False
+            readable, _, _ = select.select([self.client_socket], [], [], 1)
+            if readable:
+                response = self.client_socket.recv(1028).decode()
+
+                if 'Welcome' in response:
+                    print(f"{response}")
+                    return True
+                elif 'taken' in response:
+                    print(f"{response}")
+                    self.client_socket.close() 
+                    self.exit_run.set()  
+                    self.exit_receive.set()
+                    return False
+                else:
+                    return False
             
         except Exception as e:
             print(f"Error connecting to the server: {e}")
@@ -183,21 +211,38 @@ class ClientTCP:
     def receive(self):
         # receive messages until message is server shutdown in which events will be set to true
         while self.exit_receive.is_set() == False:
-            message = self.client_socket.recv(1028).decode()
+            try:
+                # Check if the socket is still valid
+                if self.client_socket.fileno() == -1:
+                    print("Socket is closed. Exiting receive loop.")
+                    break
 
-            if message == 'server-shutdown':
+                readable, _, _ = select.select([self.client_socket], [], [], 1)
+                if readable:
+                        message = self.client_socket.recv(1028).decode()
+                        if not message:
+                            print("Server disconnected.")
+                            self.exit_receive.set()
+                            break  
+                        elif message == 'server-shutdown':
+                            self.exit_receive.set()
+                            self.exit_run.set()
+                            break
+                        else:
+                            print(message)
+            except OSError as e:
+                print(f"Error receiving message: {e}")
                 self.exit_receive.set()
-                self.exit_run.set()
-            else:
-                print(message)
+                break  # Exit the loop on error
 
     def run(self):
+        
+        if not self.connect_server():
+            return
+
+        receiveThread = threading.Thread(target=self.receive)
+        receiveThread.start()
         try:
-            self.connect_server()
-
-            receiveThread = threading.Thread(target=self.receive)
-            receiveThread.start()
-
             while self.exit_run.is_set() == False:
                 userInput = input("Enter message (type 'exit' to leave): \n")
                 # if the user input is exit then events will be set
@@ -217,7 +262,8 @@ class ClientTCP:
             self.exit_run.set() 
             
         finally:
-            self.client_socket.close()
+            if self.client_socket.fileno() != -1:
+                self.client_socket.close()
             receiveThread.join()
             print("Client has exited.")
 
