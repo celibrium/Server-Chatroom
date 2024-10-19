@@ -1,5 +1,6 @@
 import socket
 import threading 
+import select
 
 class ServerTCP:
     def __init__(self, server_port):
@@ -8,42 +9,45 @@ class ServerTCP:
         addr = socket.gethostbyname(socket.gethostname())
 
         # create and bind socket
-        self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.serverSocket.bind((addr,server_port))
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind((addr,server_port))
 
         # listen for incoming connections
-        self.serverSocket.listen(10)
+        self.server_socket.listen(10)
         print(f"Listening on server address {addr} and port {server_port}")
 
         # initialize empty dict to store clients address and name
         self.clients = {}
 
         # events to handle server and message state
-        self.runEvent = threading.Event()
-        self.handleEvent = threading.Event()
+        self.run_event = threading.Event()
+        self.handle_event = threading.Event()
 
 
     def accept_client(self):
         try:
             # accept client connection
-            clientSocket, clientAddr = self.serverSocket.accept()
+            client_socket, clientAddr = self.server_socket.accept()
             print(f"Received connection from {clientAddr}")
 
             # stores name into variable
-            clientName = clientSocket.recv(1024).decode()
+            clientName = client_socket.recv(1024).decode()
+            print(f"TESTING {self.clients}")
+            print(f"TESTING : CLIENT NAME IS {clientName}")
 
             # checks if the client name is in dict
             if clientName in self.clients.values():
-                clientSocket.sendall("Name already taken".encode())
-                clientSocket.close()
+                print("HEWO HEWO")
+                client_socket.sendall("Name already taken".encode())
+                client_socket.close()
                 return False
             else:
             #if not, then add client name to dict nd broadcast join
-                clientSocket.sendall(f"Welcome {clientName}.".encode())
-                self.clients[clientSocket] = clientName
-                self.broadcast(clientSocket, 'join')
+                client_socket.sendall(f"Welcome {clientName}.".encode())
+                self.clients[client_socket] = clientName
+                self.broadcast(client_socket, 'join')
 
-                clientThread = threading.Thread(target=self.handle_client, args=(clientSocket,))
+                clientThread = threading.Thread(target=self.handle_client, args=(client_socket,))
                 clientThread.daemon = True  
                 clientThread.start()
 
@@ -101,10 +105,10 @@ class ServerTCP:
                 self.close_client(c) 
 
             # sets the events to which will make it True
-            self.runEvent.set()
-            self.handleEvent.set()
+            self.run_event.set()
+            self.handle_event.set()
 
-            self.serverSocket.close()
+            self.server_socket.close()
             print("server socket closed")
         
         except Exception as e:
@@ -115,7 +119,7 @@ class ServerTCP:
         
     def handle_client(self, client_socket):
         try:
-            while self.handleEvent.is_set() == False:
+            while self.handle_event.is_set() == False:
                 message = client_socket.recv(1028).decode()
 
                 if message == 'exit':
@@ -129,7 +133,7 @@ class ServerTCP:
     def run(self):
         print("Server started.")
         try:
-            while self.runEvent.is_set() == False:  
+            while self.run_event.is_set() == False:  
                 # Handle the new client
                 if self.accept_client():
                     print("client accepted successfully")
@@ -147,21 +151,21 @@ class ClientTCP:
         self.server_port = server_port
 
         # get server address and initalize client socket
-        self.serverAddr = socket.gethostbyname(socket.gethostname())
-        self.clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_addr = socket.gethostbyname(socket.gethostname())
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         # make variables to handle threading events
-        self.exitRun = threading.Event()
-        self.exitReceive = threading.Event()
+        self.exit_run = threading.Event()
+        self.exit_receive = threading.Event()
 
     def connect_server(self):
         try:
             # connect the client sokcet to the given addr and port
-            self.clientSocket.connect((self.serverAddr, self.server_port))
+            self.client_socket.connect((self.server_addr, self.server_port))
 
             # send thc client name to the server and get a response
-            self.clientSocket.sendall(self.client_name.encode())
-            response = self.clientSocket.recv(1028).decode()
+            self.client_socket.sendall(self.client_name.encode())
+            response = self.client_socket.recv(1028).decode()
 
             if 'Welcome' in response:
                 print(f"{response}")
@@ -174,16 +178,16 @@ class ClientTCP:
             return False
 
     def send(self, text):
-        self.clientSocket.sendall(text.encode())
+        self.client_socket.sendall(text.encode())
 
     def receive(self):
         # receive messages until message is server shutdown in which events will be set to true
-        while self.exitReceive.is_set() == False:
-            message = self.clientSocket.recv(1028).decode()
+        while self.exit_receive.is_set() == False:
+            message = self.client_socket.recv(1028).decode()
 
             if message == 'server-shutdown':
-                self.exitReceive.set()
-                self.exitRun.set()
+                self.exit_receive.set()
+                self.exit_run.set()
             else:
                 print(message)
 
@@ -194,8 +198,8 @@ class ClientTCP:
             receiveThread = threading.Thread(target=self.receive)
             receiveThread.start()
 
-            while self.exitRun.is_set() == False:
-                userInput = input("Enter message (type 'exit' to leave):\n ")
+            while self.exit_run.is_set() == False:
+                userInput = input("Enter message (type 'exit' to leave): \n")
                 # if the user input is exit then events will be set
                 if userInput == 'exit':
                     self.send('exit')
@@ -209,20 +213,22 @@ class ClientTCP:
         except KeyboardInterrupt:
             print("KeyboardInterrupt, exiting")
             self.send('exit')
-            self.exitReceive.set()
-            self.exitRun.set() 
+            self.exit_receive.set()
+            self.exit_run.set() 
             
         finally:
+            self.client_socket.close()
             receiveThread.join()
             print("Client has exited.")
 
+'''
 class ServerUDP:
     def __init__(self, server_port):
         self.server_port = server_port
-        serverAddr = socket.gethostbyname(socket.gethostname())
+        server_addr = socket.gethostbyname(socket.gethostname())
 
-        self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.serverSocket.bind(serverAddr, server_port)
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_socket.bind((server_addr, self.server_port))
 
         self.clients = {}
         self.messages = []
@@ -236,7 +242,7 @@ class ServerUDP:
             return False
 
         # Otherwise, send a "Welcome" message to the client
-        welcomeMessage = "Welcome to the chat!"
+        welcomeMessage = "Welcome!"
         self.server_socket.sendto(welcomeMessage.encode(), client_addr)
 
         # Add the client's address and name to the clients dictionary
@@ -281,7 +287,7 @@ class ServerUDP:
             self.server_socket.sendto(message.encode(), c)
 
     def shutdown(self):
-        self.message.append((None, 'server-shutdown'))
+        self.messages.append((None, 'server-shutdown'))
         self.broadcast()
 
         # Broadcast the shutdown message to all connected clients
@@ -296,20 +302,22 @@ class ServerUDP:
         return len(self.clients)
         
     def run(self):
+        print("Server started.")
+        print("Waiting to receive connections...")
         try:
             while True:
                 # Receive a message and the client's address
                 data, client_addr = self.server_socket.recvfrom(1024)  # buffer size of 1024 bytes
                 message = data.decode()
+                clientName = message.split(':')[0]
 
-                
-                if message == 'join':
-                    self.accept_client(client_addr, message)
+                if 'join' in message:
+                    self.accept_client(client_addr, clientName)
                 elif message == "exit":
                     self.close_client(client_addr)
                 else:
                     if client_addr in self.clients:
-                        self.messages.append(client_addr, message)
+                        self.messages.append(client_addr, clientName)
 
                 # Broadcast the message to other clients
                 self.broadcast()
@@ -326,22 +334,23 @@ class ClientUDP:
         self.client_name = client_name
         self.server_port = server_port
 
-        self.serverAddr = socket.gethostbyname(socket.gethostname())
-        self.clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_addr = socket.gethostbyname(socket.gethostname())
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        self.exitRun = threading.Event()
-        self.exitReceive = threading.Event()
+        self.exit_run = threading.Event()
+        self.exit_receive = threading.Event()
 
     def connect_server(self):
         # try to send join message and wait for response
         try:
             self.send('join')
 
-            data, server_addr = self.client_socket.recvfrom(1024)
+            data, _ = self.client_socket.recvfrom(1024)
             response = data.decode()
 
             # if the response is Welcome then return True
             if response == 'Welcome':
+                print("Connected to chat")
                 return True
             else:
                 return False
@@ -354,7 +363,7 @@ class ClientUDP:
         try:
             message = f"{self.client_name}:{text}"
 
-            self.clientSocket.sendto(message.encode(), self.serverAddr)
+            self.client_socket.sendto(message.encode(), (self.server_addr, self.server_port))
             print("message sent")
 
         except Exception as e:
@@ -362,13 +371,13 @@ class ClientUDP:
 
     def receive(self):
         try:
-            while self.exitReceive.is_set() == False:
+            while self.exit_receive.is_set() == False:
                 data, server_addr = self.client_socket.recvfrom(1024)
                 message = data.decode()
 
                 if message == 'server-shutdown':
-                    self.exitReceive.set()
-                    self.exitRun.set()
+                    self.exit_receive.set()
+                    self.exit_run.set()
                     break
                 else:
                     print(message)
@@ -389,8 +398,8 @@ class ClientUDP:
                 # if the user input is exit then events will be set
                 if userInput == 'exit':
                     self.send('exit')
-                    self.exitRun.set() 
-                    self.exitReceive.set()  
+                    self.exit_run.set() 
+                    self.exit_receive.set()  
                     break
 
                 # Otherwise, send the message to the server
@@ -405,4 +414,4 @@ class ClientUDP:
         finally:
             receiveThread.join()
             print("Client has exited.")
-        
+''' 
